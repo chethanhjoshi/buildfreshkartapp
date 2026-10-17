@@ -1,0 +1,45 @@
+# IMAGE is replaced by deploy.ps1 with the ECR image URI.
+# The OPENROUTER_API_KEY comes from the "freshkart-env" Secret (created from .env by deploy.ps1).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: freshkart
+spec:
+  # Keep 1 replica: chat history and the Ops log live in process memory,
+  # and Streamlit's websocket session must stay on one pod.
+  replicas: 1
+  selector:
+    matchLabels: {app: freshkart}
+  template:
+    metadata:
+      labels: {app: freshkart}
+    spec:
+      containers:
+        - name: app
+          image: IMAGE
+          ports: [{containerPort: 8501}]
+          envFrom:
+            - secretRef: {name: freshkart-env}
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet: {path: /_stcore/health, port: 8501}
+            initialDelaySeconds: 30
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: freshkart
+  annotations:
+    # Long idle timeout so Streamlit's websocket isn't dropped
+    service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout: "3600"
+spec:
+  type: LoadBalancer
+  selector: {app: freshkart}
+  ports:
+    - port: 80
+      targetPort: 8501
